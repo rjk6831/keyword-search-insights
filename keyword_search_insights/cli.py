@@ -22,7 +22,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--format", choices=("chart", "table", "csv", "json", "html"), default="chart"
     )
-    parser.add_argument("--output", type=Path, help="New output file; required for HTML")
+    parser.add_argument("--output", type=Path, help="Write to a new file instead of stdout")
     return parser
 
 
@@ -33,14 +33,19 @@ def _choose_profile() -> str:
         print(f"  {index}. {PROFILES[key].label}")
     raw = input("> ").strip()
     try:
-        return keys[int(raw) - 1]
-    except (ValueError, IndexError):
+        selection = int(raw)
+    except ValueError:
         raise ValueError("timeframe selection must be a number from 1 to 5")
+    if not 1 <= selection <= len(keys):
+        raise ValueError("timeframe selection must be a number from 1 to 5")
+    return keys[selection - 1]
 
 
 def _collect_interactive(args: argparse.Namespace) -> argparse.Namespace:
     if args.input is None:
         raw = input("CSV path (date, interest, optional is_partial):\n> ").strip()
+        if not raw:
+            raise ValueError("CSV path cannot be empty")
         args.input = Path(raw)
     if not args.term:
         args.term = input("Search term or topic label:\n> ").strip()
@@ -61,8 +66,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         candles, window_start, window_end = build_candles(loaded.observations, profile)
         if args.format == "html" and args.output is None:
             raise ValueError("--output is required for HTML reports")
-        if args.output is not None and args.output.exists():
-            raise ValueError(f"output already exists: {args.output}")
+    except (EOFError, KeyboardInterrupt):
+        print("cancelled: no changes were written", file=sys.stderr)
+        return 130
     except (OSError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -86,35 +92,55 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             f"Input cadence is about {cadence:g} days, coarser than the selected bucket; gaps are not interpolated."
         )
 
-    if args.format in {"chart", "table"}:
-        print(f"{args.term} — {profile.label}")
-        print(f"Input frame: {window_start.isoformat()} through {window_end.isoformat()}")
-        print("Values are relative indices from this input frame, not absolute search volume.")
-        for warning in warnings:
-            print(f"Warning: {warning}")
+    source_start = loaded.source_start
+    source_end = loaded.source_end
+    preamble = [
+        f"{args.term} — {profile.label}",
+        f"Display window: {window_start.isoformat()} through {window_end.isoformat()}",
+        f"Source coverage: {source_start.isoformat()} through {source_end.isoformat()}",
+        "Values retain the input series' relative-interest scale; filtering does not renormalize them.",
+    ]
+    if loaded.source_format == "google-trends-export":
+        preamble.append("Source: Google Trends export — https://trends.google.com/trends/")
+    preamble.extend(f"Warning: {warning}" for warning in warnings)
+
     if args.format == "chart":
-        print(render_chart(candles))
-        print()
-        print(render_table(candles))
+        content = "\n".join(preamble + [render_chart(candles), "", render_table(candles)])
     elif args.format == "table":
-        print(render_table(candles))
+        content = "\n".join(preamble + [render_table(candles)])
     elif args.format == "csv":
-        print(render_csv(candles))
+        content = render_csv(candles)
     elif args.format == "json":
-        print(render_json(candles))
+        content = render_json(candles)
     else:
-        report = render_html_report(
+        content = render_html_report(
             term=args.term,
             profile_label=profile.label,
             candles=candles,
             observations=loaded.observations,
             window_start=window_start,
             window_end=window_end,
+            source_start=source_start,
+            source_end=source_end,
             source_format=loaded.source_format,
             source_column=loaded.source_column,
             warnings=warnings,
         )
-        args.output.write_text(report, encoding="utf-8")
+
+    if args.output is None:
+        print(content)
+        return 0
+    try:
+        with args.output.open("x", encoding="utf-8", newline="") as handle:
+            handle.write(content)
+            handle.write("\n")
+    except FileExistsError:
+        print(f"error: output already exists: {args.output}", file=sys.stderr)
+        return 2
+    except OSError as exc:
+        print(f"error: could not write output {args.output}: {exc}", file=sys.stderr)
+        return 2
+    else:
         print(f"Wrote {args.output}")
     return 0
 

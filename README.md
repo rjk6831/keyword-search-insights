@@ -5,7 +5,12 @@ summarizes one normalized search-interest series as open, high, low, and close
 (OHLC) buckets. It accepts the term or topic label at runtime and never embeds a
 search query.
 
-The current release reads a neutral CSV or a downloaded Google Trends timeline
+I built this utility to turn an exported search-interest timeline into a compact,
+inspectable view without implying that relative interest is market price or
+absolute search volume. It is also a small Python project that is easy to review,
+test, and extend in public.
+
+The utility currently reads a neutral CSV or a downloaded Google Trends timeline
 CSV. It does not call Google, Bing, or an unofficial endpoint. That boundary
 makes the transformation reproducible and keeps provider access, credentials,
 and terms of use outside the core.
@@ -53,10 +58,11 @@ python -m keyword_search_insights \
   --format chart
 ```
 
-Formats are `chart`, `table`, `csv`, `json`, and `html`. HTML is a self-contained
+Formats are `chart`, `table`, `csv`, `json`, and `html`. Any format can be written
+to a new file with `--output`; existing files are never overwritten. Without
+`--output`, text formats print to standard output. HTML is a self-contained
 report with an inline SVG candlestick chart, a source-line overlay, coverage, and
-the interpretation caveats embedded in the file. It requires an explicit new
-path and will not overwrite an existing file:
+the interpretation caveats embedded in the file, so HTML requires `--output`:
 
 ```bash
 python -m keyword_search_insights \
@@ -83,6 +89,10 @@ values are skipped and counted because their exact numeric value is unavailable.
 Coarser input is never upsampled or interpolated. The included fixture is
 synthetic transformation data, not a claim about any real query.
 
+Human-readable reports distinguish the selected display window from the source
+file's actual coverage. Filtering retains the scale already present in the input;
+it does not renormalize the values.
+
 ## Verify it
 
 ```bash
@@ -97,10 +107,10 @@ self-contained HTML/SVG charts, and machine-readable output. Planned work is
 kept in [BACKLOG.md](BACKLOG.md). No live provider, cross-export normalization,
 absolute-volume estimation, GUI, or hosted service is implemented.
 
-This repository is a candidate small-project fixture for CrewKite UAT. It has not
-been qualified by CrewKite, and no CrewKite release or provider capability is
-implied.
+The bounded CrewKite test scope and manual checks are recorded in
+[`docs/UAT.md`](docs/UAT.md). This seed has not been released or qualified by
+CrewKite, and it does not imply any provider capability.
 
 The code is available under the MIT License. The supplied legacy file remains
-outside this repository and unchanged; `provenance/ORIGIN.md` records its source
-path and checksum.
+outside this repository and unchanged; `provenance/ORIGIN.md` records its
+basename and checksum without publishing a private filesystem path.

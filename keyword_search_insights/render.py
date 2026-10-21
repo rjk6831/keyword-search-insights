@@ -88,6 +88,8 @@ def render_html_report(
     observations: Sequence[Observation],
     window_start: date,
     window_end: date,
+    source_start: date,
+    source_end: date,
     source_format: str,
     source_column: str,
     warnings: Sequence[str],
@@ -162,6 +164,9 @@ def render_html_report(
     title = html.escape(term)
     profile = html.escape(profile_label)
     source = html.escape(f"{source_format}: {source_column}")
+    attribution = ""
+    if source_format == "google-trends-export":
+        attribution = ' · <a href="https://trends.google.com/trends/">Google Trends export</a>'
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -185,7 +190,7 @@ code {{ overflow-wrap:anywhere; }}
 </head>
 <body><main>
 <h1>{title}</h1>
-<div class="meta">{profile} · {window_start.isoformat()} through {window_end.isoformat()} · {source}</div>
+<div class="meta">{profile} · Display window: {window_start.isoformat()} through {window_end.isoformat()} · Source coverage: {source_start.isoformat()} through {source_end.isoformat()} · {source}{attribution}</div>
 <div class="card">
 <svg viewBox="0 0 {width} {height}" role="img" aria-labelledby="chart-title chart-desc">
 <title id="chart-title">OHLC summary for {title}</title>
@@ -197,6 +202,6 @@ code {{ overflow-wrap:anywhere; }}
 </div>
 <p class="note">The line shows available source observations. Candles summarize first, maximum, minimum, and last values within each bucket. A dot marks a single-observation bucket; it is not an inferred range. Dashed candles touch the selected window edge or include a source-partial point.</p>
 <h2>Coverage and caveats</h2>
-<ul><li>Values are relative indices from this input frame, not absolute search volume.</li><li>Separately normalized exports may not share a scale.</li>{warning_items}</ul>
+<ul><li>Values retain the input series' relative-interest scale; selecting a display window does not renormalize them.</li><li>Values are not absolute search volume.</li><li>Separately normalized exports may not share a scale.</li>{warning_items}</ul>
 <div class="card"><table><thead><tr><th>Bucket</th><th>Open</th><th>High</th><th>Low</th><th>Close</th><th>n</th><th>Observed</th><th>Flags</th></tr></thead><tbody>{''.join(rows)}</tbody></table></div>
 </main></body></html>"""

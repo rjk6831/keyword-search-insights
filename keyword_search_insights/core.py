@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import re
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
@@ -21,6 +22,8 @@ class LoadedSeries:
     observations: List[Observation]
     source_format: str
     source_column: str
+    source_start: date
+    source_end: date
     skipped_missing: int = 0
     skipped_below_one: int = 0
 
@@ -66,12 +69,13 @@ def _parse_bool(value: str, row_number: int) -> bool:
     raise ValueError(f"row {row_number}: is_partial must be true or false")
 
 
-def _parse_source_date(value: str, row_number: int) -> date:
+def _parse_source_date(value: str, row_number: int, time_header: str) -> date:
     cleaned = value.strip()
-    if len(cleaned) == 7 and cleaned[4] == "-":
+    if time_header.casefold() == "month" and re.fullmatch(r"\d{4}-\d{2}", cleaned):
         cleaned += "-01"
-    elif len(cleaned) >= 10:
-        cleaned = cleaned[:10]
+    elif not re.fullmatch(r"\d{4}-\d{2}-\d{2}", cleaned):
+        expected = "YYYY-MM" if time_header.casefold() == "month" else "YYYY-MM-DD"
+        raise ValueError(f"row {row_number}: date must use {expected}")
     try:
         return date.fromisoformat(cleaned)
     except ValueError as exc:
@@ -114,6 +118,8 @@ def load_csv(path: Path, term: Optional[str] = None) -> LoadedSeries:
 
     header_index = None
     for index, row in enumerate(rows):
+        if row and row[0].strip().casefold() == "hour":
+            raise ValueError("hourly CSV input is not supported; aggregate it to daily data first")
         if row and row[0].strip().casefold() in {"date", "day", "week", "month"}:
             header_index = index
             break
@@ -121,14 +127,28 @@ def load_csv(path: Path, term: Optional[str] = None) -> LoadedSeries:
         raise ValueError("CSV must contain a date, day, week, or month timeline header")
 
     fieldnames = [name.strip() for name in rows[header_index]]
+    if any(not name for name in fieldnames):
+        raise ValueError("CSV header names cannot be empty")
+    folded_headers = [name.casefold() for name in fieldnames]
+    if len(folded_headers) != len(set(folded_headers)):
+        raise ValueError("CSV contains duplicate or case-ambiguous header names")
     interest_column, source_format = _choose_interest_column(fieldnames, term)
+    header_lookup = {name.casefold(): name for name in fieldnames}
+    partial_column = header_lookup.get("is_partial") or header_lookup.get("ispartial")
     observations: List[Observation] = []
+    source_days: List[date] = []
     skipped_missing = 0
     skipped_below_one = 0
     for row_number, values in enumerate(rows[header_index + 1 :], start=header_index + 2):
         if not values or not any(value.strip() for value in values):
             continue
+        if len(values) != len(fieldnames):
+            raise ValueError(
+                f"row {row_number}: expected {len(fieldnames)} fields, found {len(values)}"
+            )
         row = dict(zip(fieldnames, values))
+        day = _parse_source_date(row.get(fieldnames[0], ""), row_number, fieldnames[0])
+        source_days.append(day)
         raw_interest = (row.get(interest_column) or "").strip()
         if not raw_interest:
             skipped_missing += 1
@@ -136,16 +156,13 @@ def load_csv(path: Path, term: Optional[str] = None) -> LoadedSeries:
         if raw_interest == "<1":
             skipped_below_one += 1
             continue
-        day = _parse_source_date(row.get(fieldnames[0], ""), row_number)
         try:
             interest = float(raw_interest)
         except ValueError as exc:
             raise ValueError(f"row {row_number}: invalid interest value") from exc
         if not 0 <= interest <= 100:
             raise ValueError(f"row {row_number}: interest must be between 0 and 100")
-        partial = _parse_bool(
-            row.get("is_partial", row.get("isPartial", "")) or "", row_number
-        )
+        partial = _parse_bool(row.get(partial_column, "") if partial_column else "", row_number)
         observations.append(Observation(day, interest, partial))
 
     observations.sort(key=lambda item: item.day)
@@ -158,6 +175,8 @@ def load_csv(path: Path, term: Optional[str] = None) -> LoadedSeries:
         observations=observations,
         source_format=source_format,
         source_column=interest_column,
+        source_start=min(source_days),
+        source_end=max(source_days),
         skipped_missing=skipped_missing,
         skipped_below_one=skipped_below_one,
     )
